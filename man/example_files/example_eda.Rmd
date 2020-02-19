@@ -1,0 +1,118 @@
+---
+title: "Example Data Exploration with ravelRy"
+output: github_document
+---
+
+```{r setup, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 6, fig.height = 4)
+library(ravelRy)
+library(tidyverse)
+source('../../../kp_themes/theme_kp.R')
+theme_set(theme_classic() + theme_kp())
+```
+
+### Patterns  
+
+Start by retrieving a sample of patterns for babies and their details.  
+
+```{r}
+patterns <- search_patterns(page_size = 100, fit = 'baby')
+pattern_details <- get_patterns(ids = patterns$id)
+```
+
+Top 10 designers by pattern count in sample:  
+
+```{r}
+patterns %>%
+  group_by(designer.name) %>%
+  count() %>%
+  ungroup() %>%
+  arrange(desc(n)) %>%
+  slice(1:10)
+```
+
+Look at the density of comments based on the cost of the pattern:   
+
+```{r}
+pattern_details %>%
+  ggplot(aes(x = comments_count, fill = free)) +
+  geom_density(alpha = 0.7) +
+  labs(title = 'Comment count by free/paid in sample') +
+  scale_fill_kp()
+```
+
+Unnest two columns and take a count:  
+
+```{r}
+pattern_details %>%
+  unnest(craft, names_sep = '_') %>% 
+  unnest(pattern_type, names_sep = '_') %>% 
+  group_by(craft_name, pattern_type_name) %>%
+  count() %>%
+  ggplot(aes(x = reorder(pattern_type_name, n, sum), y = n, fill = craft_name)) +
+  geom_col() +
+  labs(title = 'Pattern type by craft in sample',
+       x = 'pattern_type_name') +
+  scale_fill_kp()
+```
+
+### Yarn  
+
+Start by retrieving a sample of yarns and their details.  
+
+```{r}
+yarns <- search_yarn(page_size = 100, sort = 'projects', fiberc = '2')
+yarn_details <- get_yarns(ids = yarns$id)
+```
+
+Get the top rated yarns in the sample:  
+
+```{r}
+yarns %>%
+  arrange(desc(rating_average)) %>%
+  select(id, name, rating_average) %>%
+  slice(1:5)
+```
+
+How do fiber types appear together in yarn? 
+
+```{r, fig.height = 6}
+# get the top 10 fiber types 
+top_fiber_types <- yarn_details %>%
+  unnest(yarn_fibers, names_sep = '_') %>%
+  count(yarn_fibers_fiber_type.name) %>%
+  filter(n > 5) %>%
+  arrange(desc(n)) %>%
+  slice(1:10)
+
+# unnest the yarn_fibers column, bucket fiber names, and spread wide
+yarn_fibers_wide <- yarn_details %>% 
+  unnest(yarn_fibers, names_sep = '_') %>%
+  mutate(yarn_fiber_name = ifelse(yarn_fibers_fiber_type.name %in% top_fiber_types$yarn_fibers_fiber_type.name,
+                                  yarn_fibers_fiber_type.name,
+                                  'Other')) %>%
+  pivot_wider(id_cols = 'id', 
+              names_from = 'yarn_fiber_name', 
+              values_from = 'yarn_fibers_percentage', 
+              values_fn = list(yarn_fibers_percentage = sum)) 
+
+# compute correlation and plot
+yarn_fibers_wide %>%
+  select(-id) %>%
+  mutate_if(is.numeric, function(x) ifelse(is.na(x), 0, 1)) %>%
+  cor() %>%
+  corrplot::corrplot(type = 'upper', 
+                     method = 'color', 
+                     order = 'hclust', 
+                     tl.col = 'black', 
+                     addCoef.col = 'black',
+                     number.cex = 0.6,
+                     col = colorRampPalette(colors = c(
+                       kp_cols('red'), 
+                       'white', 
+                       kp_cols('dark_blue')))(200),
+                     mar = c(2,2,2,2),
+                     main = 'Yarn Fiber Correlation',
+                     family = 'Avenir')
+
+```
